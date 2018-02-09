@@ -1,24 +1,25 @@
 import yaml #for configs 
 import os
 import warnings 
+import pickle 
 
 def write_vector(filepath, vec, delimiter="\n", do_not_overwrite=False):
 	"""
-		Converts vector elements to strings, and then writes to a text file.
+	Converts vector elements to strings, and then writes to a text file.
 	"""
 	if os.path.exists(filepath):
 		if do_not_overwrite:
 			raise ValueError("Trying to write to filepath %s which already exists" %(filepath))
 		else: 
-			warnings.warn("Trying to write to filepath %s which already exists" %(filepath))
+			warnings.warn("Overwriting filepath %s which already exists" %(filepath))
 	with open(filepath,'w') as f:
 		for (idx, val) in enumerate(vec):
 			f.write(str(val)+delimiter)
 
 def read_filepath_of_delimited_ints_as_vector(filepath, delimiter="\n"):
 	"""
-		Takes filepath containing delimited integers and returns 
-		it as a vector 
+	Takes filepath containing delimited integers and returns 
+	it as a vector 
 	"""
 	ints_as_strings=read_text_file_as_list_of_strings(filepath)
 	int_vector=[int(x.strip(delimiter)) for x in ints_as_strings]
@@ -32,8 +33,6 @@ def read_text_file_as_list_of_strings(filepath):
 def load_configs(local_configs_path):
 	with open(local_configs_path, 'r') as f:
 		configs = yaml.load(f)	
-		print("Configurations file:")
-		print configs 
 	return configs 
 	
 def write_rows_to_text(filepath, rows, mode="w",return_delimited=False):

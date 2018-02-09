@@ -1,0 +1,17 @@
+
+run_summary: "both_features" 
+results_super_dir: "results/"
+model_type: "Baum-Welch"
+default_unlikely_value: -200.00 
+label_tracker:  
+    all_labels:  #map labels to train pct. 
+        train_pct: .80
+        data_dirs: ["data/expt2/paper/"]
+dir_filter: "*txt"
+corpus_type: "APIFlexiCorpus"
+use_separate_hmms_for_each_label: True
+K: 10
+feature_types: 
+    - "log_likelihoods"
+    - "log_state_marginals"
+seed: 1234

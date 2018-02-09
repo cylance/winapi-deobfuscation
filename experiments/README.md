@@ -67,7 +67,7 @@ The results and plots from the paper can be reproduced by
 python src/winapi_deobf_experiments/api.py
 ```
 
-which contains the functions _run\_experiment\_1()_ and _run\_experiment\_2()_.
+which contains the functions _run\_expt\_1()_ and _run\_expt\_2()_, which perform Experiments 1 and 2 in the paper. 
 
 Alternatively, using the Makefile, run
 
@@ -75,11 +75,14 @@ Alternatively, using the Makefile, run
 make experiments 
 ```
 
-Note that results vary slightly from run to run due to randomization.  For example, the HMM algorithm
-optimizes a non-convex function and only finds local maximums to the likelihood function.  Also,
-there is some variation due to assignment of samples to training vs. test set.  However,
-these perturbations are quite minor relative to the qualitative pattern of results reported in the paper. 
+Note that results can vary slightly due to randomization as the random seed changes in the configurations file.  In particular, randomization plays a role because:
+
+1. The HMM algorithm optimizes a non-convex function and only finds local maximums to the likelihood function.   Thus, parameter initialization matters. 
+
+2. Random assignment of samples to training vs. test set can affect results.  
+
+However, these perturbations are quite minor relative to the qualitative pattern of results reported in the paper. 
 
 ### Caveat Emptor 
 
-This research code has co-opted code originally written for other purposes, so there are classes and detours in the internal logic that are unnecessary.   Still, the code allows for reproducibility and we hope it provides a platform for further research.
+This research codebase has co-opted code originally written for other purposes, so there are classes and detours in the internal logic that are unnecessary.  Moreover, the code has not been optimized for speed or cleaned.   We hope, however, we have made it sufficiently easy to exactly reproduce results in the paper and that we have provided a point of departure for further research.

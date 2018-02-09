@@ -16,36 +16,29 @@ def get_key_given_value(mydict,idx):
 	return key_name 
 
 
-def construct_configs(path_to_configs, train_pct, run_summary, dir_filter):
+def construct_configs(path_to_configs):
 	"""
 
-	Adds information to the configs object and renders it as a Bunch instance
+	Renders a yaml configs as a Bunch instance
 	so that we can treat it like a class instance. 
 
 	Arguments:
 		path_to_configs: String.
 			Filepath to configurations file.
-		train_pct: Float. 
-			Percentage of data used for training.
-		run_summary: String. 
-			String that gets used to create a subfolder of results/ for saving results.
-		dir_filter: String. 
-			Input data gets read in only if filepaths contain this string. 
 	Returns:
 		A Bunch instance representation of the configs. 
 	"""
 	configs = load_configs(path_to_configs)
-	configs["cuts_dictionary"] = {"all": {"no_valence": train_pct}} #awkward but need it so it works with current codebase
-	configs["run_summary"]=run_summary 
-	configs["dir_filter"]=dir_filter 
 	return Bunch(**configs) 
+
+
 
 class Bunch:
 	"""
-		Transforms a dictionary into class attributes. 
-			e.g. point = Bunch(datum=y, squared=y*y, coord=x)
-		In my case I used this to load configs yaml file (loaded as a dictionary)
-		into my class.  
+	Transforms a dictionary into class attributes. 
+		e.g. point = Bunch(datum=y, squared=y*y, coord=x)
+	In my case I used this to load configs yaml file (loaded as a dictionary)
+	into my class.  
 
 	"""
 	def __init__(self, **kwds):

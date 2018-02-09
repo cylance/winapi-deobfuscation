@@ -15,7 +15,7 @@ env:
 	ln -sfn $(PWD)/src/$(NAME) $(SITE_PACKAGES)/$(NAME)
 
 test:
-	env/bin/nosetests -s tests
+	env/bin/nosetests -s tests/unit/
 
 experiments:
 	env/bin/python $(PWD)/src/$(NAME)/api.py 

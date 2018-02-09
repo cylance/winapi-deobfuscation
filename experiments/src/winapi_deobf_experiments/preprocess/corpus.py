@@ -8,44 +8,34 @@ import copy #to copy arrays
 from winapi_deobf_experiments.util.io import *
 from winapi_deobf_experiments.util.representation import Bunch
 from winapi_deobf_experiments.preprocess.filepath_tracker import FilepathTracker
-from winapi_deobf_experiments.preprocess.cuts import Cuts
+from winapi_deobf_experiments.preprocess.cut import Cut
 
 ##########################################################################################################################
 ###########################################################################################################################
 ###########################################################################################################################
 
-def make_corpus(configs, local_data_dir, corpus_type):
-
-	### ### Load Time Series  
-	local_data_labels_and_dirs={"no_valence": [local_data_dir]}
-	corpus=	CorpusFactory(corpus_type).corpus_class(configs, local_data_labels_and_dirs)
-	corpus.make_corpus_and_labels_and_filepath_trackers() #TD: parallelize this
-	corpus.make_cuts()
-
-	### ### Load Vocabulary 
-	corpus.construct_vocabulary()
-	corpus.construct_numeric_corpus()
+def make_corpus(configs):
+	corpus=	CorpusFactory(configs.corpus_type).corpus_class(configs, configs.seed)
 	return corpus 
 
 
 class CorpusFactory:
 	"""
-	Automatically determines which derived class (e.g ProcessCorpus, FileByPIDsDeInterleaved, etc.)
-	to use based on a field in the configurations yaml file.  
+	Determines which derived class (of the Corpus base class)
+	to use based on a string. 
+
+	Attributes:
+		corpus_class: A non-ABC subtype of the Corpus class below. 
+
 	"""
 	def __init__(self, corpus_type):
-		self.corpus_class=None
-		self.get_corpus_class(corpus_type)
-
-	def get_corpus_class(self, corpus_type):
 		self.corpus_class={
 			"APICorpus": APICorpus, 
-			"APIFlexiCorpus": APIFlexiCorpus
+			"APIFlexiCorpus": APIFlexiCorpus,
+			"ETSCorpus": ETSCorpus
 			}.get(corpus_type)
 		if not self.corpus_class:
 			raise ValueError('corpus_type for the Corpus Class is unexpected value: %s' % corpus_type)
-		return self.corpus_class
-
 
 ###########################################################################################################################
 ###########################################################################################################################
@@ -55,100 +45,170 @@ class CorpusFactory:
 
 class Corpus:
 	"""
-		An instance of this class contains original corpus and post-model summary 
-		information to be exported.
 
-		TD: fill this in
+	Takes a set of directories (each with potentially many filepaths, than in turn have potentially
+	many time series), with provided string labels, and creates a "corpus", which is a flattened 
+	representation of the time series extracted fromd disk. 
 
-		Attributes:
-			configs: A Bunch instance.  The yaml configs file as a (key, value) dictionary is represented instead as a 
-				class instance (so we can call e.g. configs.instance_type instead of configs["instance_type"])
-			corpus:  A list of lists of strings.  Each corpus[i] represents a single sequence, and corpus[i][j] is an event observed from sequence. 
-			numeric_corpus: list of np arrays of integers.  Each numeric_corpus[i] represents a single sequence, and numeric_corpus[i][j] is the 
-					numeric indicator (e.g. 24) of the label for that sequence. 
-			labels: List of strings.  labels[i] is the label for the ith sequence. 
-			vocab_dict: Dictionary. Keys are all the tokens in the training set and values are their number of occurences. 
-			W: Int. The number of items in vocab_dict (i.e. the size of the "alphabet" = space of possible tokens.)
-			filepaths: List of strings.  Gives filepaths to data. 
+	To read in your own distinct datatype for your own distinct problem, you just need to define 
+	your own corpus subclass that determines how the data is read in.  In particular, just need to 
+	define a custom _read_filepath_corpus_and_get_labels(filepath, label) method. 
+
+	Attributes:
+		corpus:  A list of lists of type obs_type.  
+			Each corpus[i] represents a single sequence, and corpus[i][j] is an event observed from sequence.
+		numeric_corpus: list of np arrays of numbers.  
+			Same structure as above, but now the rep is a float for a NumericCorpus and an int for a CategoricalCorpus.  
+		labels: List of strings.  
+			Labels[i] is the label for the ith sequence. 
+		labels_to_numeric_dict:  Dict <string, int>
+			Maps a label to an integer identifier. 
+		filepath_trackers: Dict <string,filepath_tracker)
+			Maps filepaths to information (number of t.s. samples in the filepath, first and last index, filepath label)
+		cuts: Cut 
+			The cut is a list of  indices of the corpus/numeric_corpus to use or withhold during training. 
+			determined via random selection based on labels
+		obs_type: String 
+			"numeric" for NumericCorpus, "categorical" for CategoricalCorpus 
+
+	Current hierarchy (* = abstract base class):
+		Corpus* -> DiscreteCorpus* -> APICorpus -> APIFlexiCorpus
+				-> NumericCorpus* -> ETSCorpus
 	"""
 	
 	__metaclass__ = ABCMeta 	 
 
-	def __init__(self, configs, local_data_labels_and_dirs):
-		self.configs=configs
-		self.local_data_labels_and_dirs=local_data_labels_and_dirs
-		self.filepath_trackers= {}
-		self.local_results_dir = None
-		self.cuts = Cuts();
+	def __init__(self, configs, seed=1234):
+		"""
+		Arguments:
+			configs: A Bunch instance.  
+				The yaml configs file as a (key, value) dictionary is represented instead as a 
+				class instance (so we can call e.g. configs.instance_type instead of configs["instance_type"])
+		"""
+		self._check_well_formedness_of_configs(configs)
 		self.corpus = []
-		self.labels = []
 		self.numeric_corpus = None #TD: make type explicit
-		self.numeric_labels = None 
-		self.non_detonation_idxs =[];
-		self.W = None 
-		#self.vocab_set = set()
-		self.vocab_dict = dict()
-		self.label_dict = dict()
-		self.empirical_transition_matrix = None
+		self.labels = []
+		self.labels_to_numeric_dict = dict()
+		self.filepath_trackers= {}
+		self._set_corpus_and_labels_and_filepath_trackers(configs.label_tracker, configs.dir_filter) #TD: parallelize this
+		self._set_numeric_repr_of_labels() #TD: parallelize this
+		self.cut=Cut(configs.label_tracker, self.filepath_trackers, seed)
 
-	def make_corpus_and_labels_and_filepath_trackers(self):
-		self._make_corpus_and_labels_and_filepath_trackers()
-		self._vectorize_labels()
+	def _check_well_formedness_of_configs(self, configs):
+		for label, label_info in configs.label_tracker.iteritems():
+			if set(label_info.keys())!={"data_dirs", "train_pct"}:
+				raise ValueError("The label_tracker in the configs is not well-formed; label %s"\
+					"needs to have keys for data and train_pct" %(label))
 
-	def _make_corpus_and_labels_and_filepath_trackers(self):
+	def _set_corpus_and_labels_and_filepath_trackers(self, label_tracker, dir_filter):
+		"""
+		Arguments:
+			label_tracker: Dict<string, Dict>>
+				Dictionary mapping labels to inner dicts, which maps "data_dir" to a list of strings, 
+				interpreted as filepaths, and "train_pct" to a float. 
+			dir_filter: String 
+				Tells which files to include from the label_tracker's data_dirs. 
+
+		"""
 		samples_used_so_far = 0 
-		for local_data_dir_label, local_data_dirs in self.local_data_labels_and_dirs.iteritems():
-			for (dir_idx,directory) in enumerate(local_data_dirs):
-					for filepath in glob.glob(os.path.join(directory, self.configs.dir_filter)):
-						this_corpus, these_labels = self._read_filepath_corpus_and_get_labels(filepath, \
-							local_data_dir_label)
-						self.corpus += this_corpus
-						self.labels += these_labels
-						N_samples_in_filepath = len(these_labels)
-						filepath_tracker = FilepathTracker(N_samples_in_filepath=len(these_labels), 
-							filepath_label=local_data_dir_label, 
+		for label, label_info in label_tracker.iteritems():
+			dirs_with_label=label_info["data_dirs"]
+			for (dir_idx,directory) in enumerate(dirs_with_label):
+					for filepath in glob.glob(os.path.join(directory, dir_filter)):
+						fp_corpus, fp_labels = self._read_filepath_corpus_and_get_labels(filepath, label)
+						self.corpus += fp_corpus
+						self.labels += fp_labels
+						N_samples_in_filepath = len(fp_labels)
+						fp_tracker = FilepathTracker(N_samples_in_filepath=len(fp_labels), 
+							filepath_label=label, 
 							start_idx_of_time_series_for_filepath=samples_used_so_far,
 							stop_idx_of_time_series_for_filepath=samples_used_so_far+N_samples_in_filepath-1)
-						self.filepath_trackers[filepath]=filepath_tracker
+						self.filepath_trackers[filepath]=fp_tracker
 						samples_used_so_far+=N_samples_in_filepath
-
-	def _vectorize_labels(self):
-		label_dict={}
-		numeric_labels=[0]*len(self.labels)
-		label_set=set(self.labels)
-		for word in label_set:
-			label_dict[word] = len(label_dict)
-		for (idx,label) in enumerate(self.labels):
-			numeric_labels[idx]=label_dict[label]
-		self.numeric_labels=numeric_labels
-		self.label_dict=label_dict
 
 	@abstractmethod
 	def _read_filepath_corpus_and_get_labels(self, filepath, label):
+		"""
+		Returns the corpus and labels (see class def. of these attributes) just from a particular filepath. 
+		"""
 		pass
-	
-	def make_cuts(self, seed=1234):
-		self.cuts.make_cuts(self.configs, self.filepath_trackers, seed)
 
-	#### get vocabulary
-	def construct_vocabulary(self):
+
+	def _set_numeric_repr_of_labels(self):
+		"""
+		We want to represent labels for time series using integers rather than just strings. 
+		"""
+		labels_to_numeric_dict={}
+		numeric_labels=[0]*len(self.labels)
+		label_set=set(self.labels)
+		for word in label_set:
+			labels_to_numeric_dict[word] = len(labels_to_numeric_dict)
+		self.labels_to_numeric_dict=labels_to_numeric_dict
+
+	@abstractmethod
+	def _construct_numeric_corpus(self):
+		pass 
+
+	def get_numeric_label(self, idx):
+		return self.labels_to_numeric_dict[self.labels[idx]]
+
+class NumericCorpus(Corpus):
+	"""
+	Additional attributes:
+		NONE SO FAR. 
+
+	"""
+	__metaclass__ = ABCMeta 
+
+	def __init__(self, configs, seed=1234):
+		Corpus.__init__(self, configs, seed)
+		self._construct_numeric_corpus()
+		self.obs_type="numeric"
+
+	def _construct_numeric_corpus(self):
+		self.numeric_corpus=self.corpus 
+		#TD: check further that this creates a pointer and not a copy of the data.
+		#so far it seems to be creating a pointer as adding additional fields with different names
+		#does not increase the size of the pickled file. 
+
+
+class CategoricalCorpus(Corpus):
+	"""
+	Additional attributes:
+		vocab_dict: Dictionary <obs_type, int>
+			Keys are all the tokens in the training set and values are their number of occurences. 
+		W: Int. 
+			The number of items in vocab_dict (i.e. the size of the "alphabet" = space of possible tokens.)
+
+	"""
+	__metaclass__ = ABCMeta 
+
+	def __init__(self, configs, seed=1234):
+		Corpus.__init__(self, configs, seed)
+		self._construct_vocabulary()
+		self._construct_numeric_corpus()
+		self.obs_type="categorical"
+
+	def _construct_numeric_corpus(self):
+		self.numeric_corpus = map(lambda process: np.array([self.vocab_dict[x] for x in process], dtype=np.int32), self.corpus)
+
+	def _construct_vocabulary(self):
+		self.vocab_dict=dict()
 		vocab_set=self._construct_vocabulary_as_set()
 		for word in vocab_set:
 			self.vocab_dict[word] = len(self.vocab_dict)
 		self.W=len(self.vocab_dict)
-		return self.vocab_dict
 
 	def _construct_vocabulary_as_set(self):
 		vocab_set = set()
-		for idx, single_process_stream in enumerate(self.corpus):
-			vocab_set=vocab_set.union(set(single_process_stream)) 
+		for idx, time_series in enumerate(self.corpus):
+			vocab_set=vocab_set.union(set(time_series)) 
 		return vocab_set
 
-	def construct_numeric_corpus(self):
-		self.numeric_corpus = map(lambda process: np.array([self.vocab_dict[x] for x in process], dtype=np.int32), self.corpus)
 
 
-class APICorpus(Corpus):
+class APICorpus(CategoricalCorpus):
 	"""
 	Handles files such as Vadim's API Call Data in the non-flexi case.
 
@@ -166,10 +226,9 @@ class APICorpus(Corpus):
 
 	def _read_filepath_corpus_and_get_labels(self,filepath, label):
 		"""
-			Gets the corpus (i.e. collection of time series) and labels for a given filepath in the data directory. 
+		Gets the corpus (i.e. collection of time series) and labels for a given filepath in the data directory. 
 		"""
 
-		#TD: fix warning below
 		with open(filepath, "r") as f:
 			rl = f.readlines()
 			filepath_corpus, filepath_labels = [], [];
@@ -193,7 +252,6 @@ class APICorpus(Corpus):
 				api_call_idx=idx
 				break 
 		return api_call, api_call_idx 
-
 
 class APIFlexiCorpus(APICorpus):
 	"""
@@ -227,5 +285,33 @@ class APIFlexiCorpus(APICorpus):
 				api_call_idx=idx-1
 				break 
 		return api_call, api_call_idx 
+
+class ETSCorpus(NumericCorpus):
+	"""
+	Handles files where each row is a time series of floats. 
+
+	ETSCorpus stands for "Entropy Time Series" corpus, which is where
+	I used this strategy. 
+	"""
+
+	def _read_filepath_corpus_and_get_labels(self, filepath, label):
+		"""
+		Gets the corpus (i.e. collection of time series) and labels for a given filepath in the data directory. 
+
+		Note: for numeric time series, pyhsmm requires each time series to be an 2-dim np.array 
+		with dimension (#obs, 1)
+
+		"""
+
+		with open(filepath, "r") as f:
+			rl = f.readlines()
+			filepath_corpus, filepath_labels = [], [];
+			for (line_idx, line) in enumerate(rl):
+				ts_list=[float(x) for x in line.split(",")]
+				ts=np.array(ts_list)[:,np.newaxis]
+				#label=self._label_maker(filepath)
+				filepath_corpus.append(ts)
+				filepath_labels.append(label)
+		return filepath_corpus, filepath_labels 
 
 

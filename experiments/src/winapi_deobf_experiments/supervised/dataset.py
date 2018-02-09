@@ -30,14 +30,17 @@ class Dataset(object):
 			raise NotImplementedError("You did not provide an understandable set of arguments to class Dataset")
 
 def get_dataset_for_classification(unsupervised_results_filepaths, K, dict_api_calls_to_n_args=None, \
-	use_separate_hmms_for_each_api_function=True):
+	use_separate_hmms_for_each_api_function=True, feature_types={"log_likelihoods", "log_state_marginals"}):
+
+	assert len(unsupervised_results_filepaths.paths_to_redumped_data)==1
+	path_to_redumped_data=unsupervised_results_filepaths.paths_to_redumped_data[0]
 
 	M = _get_number_of_hmm_models(dict_api_calls_to_n_args, use_separate_hmms_for_each_api_function)
-	labels, features= _get_labels_and_features_from_filepath(unsupervised_results_filepaths.path_to_dumped_data, \
-		label_idx=-1, M=M, feature_end_idx=-1, K=K) 
+	labels, features= _get_labels_and_features_from_filepath(path_to_redumped_data, \
+		label_idx=-1, M=M, feature_end_idx=-1, K=K, feature_types=feature_types) 
 
-	train_idxs=read_filepath_of_delimited_ints_as_vector(unsupervised_results_filepaths.train_idxs_filepath)
-	test_idxs=read_filepath_of_delimited_ints_as_vector(unsupervised_results_filepaths.test_idxs_filepath)
+	train_idxs=read_filepath_of_delimited_ints_as_vector(unsupervised_results_filepaths.path_to_train_idxs)
+	test_idxs=read_filepath_of_delimited_ints_as_vector(unsupervised_results_filepaths.path_to_test_idxs)
 	
 	#TD: add assertion that # train idxs + # test idxs has right size. 
 	dataset=Dataset(features=features, labels=labels, train_idxs=train_idxs, test_idxs=test_idxs)
@@ -50,23 +53,36 @@ def _get_number_of_hmm_models(dict_api_calls_to_n_args, use_separate_hmms_for_ea
 		M=1	
 	return M 
 
-def _get_labels_and_features_from_filepath(filepath, label_idx, M, feature_end_idx, K):
+def _get_labels_and_features_from_filepath(filepath, label_idx, M, feature_end_idx, K, feature_types):
 	"""
 			Arguments: 
 			M: Int. Number of models 
 	"""
-	feature_start_idx=-M*(K+3)-1
+
+	if feature_types=={"log_likelihoods"}:
+		feature_start_idx=-M*3-1
+	elif feature_types=={"log_likelihoods", "log_state_marginals"}:
+		feature_start_idx=-M*(K+3)-1
+	elif feature_types=={"log_state_marginals"}:
+		feature_start_idx=-M*(K)-1
+	else:
+		raise ValueError("You provided feature_types %s which I do not understand" %(feature_types))
+
 	labels, features=[],[]
 	with open(filepath,'rb') as csvfile:
 		csv_reader = csv.reader(csvfile, delimiter=',')
 		for (idx,row) in enumerate(csv_reader):
 			label=float(row[label_idx])
 			if not np.isnan(label):#	Rows that have nan's are ignored (this should be vestigal...)
+				row 
 				feature_vec=np.array(row[feature_start_idx:feature_end_idx], dtype=np.float)
 				labels.append(label)
 				features.append(feature_vec)
 	features=np.concatenate(features).reshape(np.shape(features)) #convert list of arrays to 2d array 	
-	_check_that_hidden_state_marginals_sum_to_one_for_each_model(features, K, M)
+	if feature_types=={"log_likelihoods", "log_state_marginals"}:
+		#if feature_type is log_state_marginals, still need to implement this. 
+		#if feature_type is likelihood_feats, there is nothing to check. 
+		_check_that_hidden_state_marginals_sum_to_one_for_each_model(features, K, M)
 	return np.array(labels, dtype="int"), features 
 
 def _check_that_hidden_state_marginals_sum_to_one_for_each_model(features, K, M):
@@ -86,4 +102,4 @@ def ensure_indexing_alignment_of_dataset_and_corpus_for_expt_2(dataset, corpus):
 		corpus: Instance of class Corpus. 
 	"""
 	for i in range(len(dataset.labels_train)):
-		assert(corpus.numeric_labels[dataset.train_idxs[i]]==dataset.labels_train[i])
+		assert(corpus.get_numeric_label(dataset.train_idxs[i])==dataset.labels_train[i])
