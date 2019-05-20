@@ -7,7 +7,7 @@
 The official version of the paper can be found [here](https://www.ndss-symposium.org/wp-content/uploads/2018/07/bar2018_11_Kotov_paper.pdf). 
 
 ### Citation 
-Kotov, V., & Wojnowicz, M. (2018). Towards generic deobfuscation of windows API calls. In _2018 Symposium on Network and Distributed System Security (NDSS), Workshop on Binary Analysis Research (BAR)._
+Kotov, V., & Wojnowicz, M. (2018). Towards generic deobfuscation of Windows API calls. In _2018 Symposium on Network and Distributed System Security (NDSS), Workshop on Binary Analysis Research (BAR)._
 
 ## Code 
 
